@@ -1,0 +1,470 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>ロボ団タイピング</title>
+  <style>
+    body { margin:0; font-family:sans-serif; background:#0b1020; color:#fff; }
+    .wrap { max-width: 1100px; margin: 20px auto; padding: 16px; }
+    .card { background:#131a33; border:1px solid #2a3768; border-radius:12px; padding:14px; margin-bottom:12px; }
+    h1,h2,h3 { margin:0 0 10px; }
+    .row { display:flex; gap:8px; flex-wrap:wrap; align-items:center; }
+    input, textarea, button {
+      padding:10px; border-radius:8px; border:1px solid #3c4b86; background:#0f1630; color:#fff;
+    }
+    textarea { width:100%; min-height:120px; resize:vertical; font-family:monospace; font-size:16px; }
+    button { cursor:pointer; background:#1d4ed8; border:none; }
+    .level-btn, .rank-level-btn { background:#334155; }
+    .level-btn.active, .rank-level-btn.active { background:#2563eb; }
+    .hud { display:grid; grid-template-columns:repeat(5,1fr); gap:8px; }
+    .stat { background:#0f1630; border-radius:8px; padding:8px; }
+    .label { color:#9fb2ff; font-size:12px; }
+    .value { font-size:20px; font-weight:bold; }
+    #target {
+      font-size:20px; line-height:1.7; white-space:pre-wrap; min-height:90px;
+      font-family:monospace; background:#0f1630; padding:12px; border-radius:10px;
+    }
+    #target .ok { color:#22c55e; }
+    #target .cur { background:#1e40af; border-bottom:2px solid #60a5fa; }
+    #countdown { font-size:40px; font-weight:800; color:#facc15; text-align:center; min-height:48px; }
+    .small { color:#93c5fd; font-size:12px; }
+    table { width:100%; border-collapse:collapse; font-size:14px; }
+    th, td { border-bottom:1px solid #2a3768; padding:8px; text-align:left; }
+    .muted { color:#9ca3af; font-size:12px; }
+    .error { color:#f87171; white-space:pre-wrap; }
+    .okmsg { color:#34d399; }
+  </style>
+</head>
+<body>
+<div class="wrap">
+
+  <div class="card">
+    <h1>ロボ団タイピング</h1>
+    <div class="row">
+      <input id="nickname" placeholder="ニックネーム" maxlength="12">
+      <input id="school" placeholder="校舎名（任意）" maxlength="30">
+      <button class="level-btn active" data-level="1">Lv1</button>
+      <button class="level-btn" data-level="2">Lv2</button>
+      <button class="level-btn" data-level="3">Lv3</button>
+      <button id="startBtn">チャレンジする</button>
+    </div>
+    <div class="small">※ 改行は Enter / 「:」の次行は自動インデント / スペース有無は判定で無視</div>
+  </div>
+
+  <div id="countdown"></div>
+
+  <div class="card hud">
+    <div class="stat"><div class="label">スコア</div><div class="value" id="score">0</div></div>
+    <div class="stat"><div class="label">コンボ</div><div class="value" id="combo">0</div></div>
+    <div class="stat"><div class="label">ミス</div><div class="value" id="miss">0</div></div>
+    <div class="stat"><div class="label">速度(cpm)</div><div class="value" id="cpm">0</div></div>
+    <div class="stat"><div class="label">問題</div><div class="value"><span id="idx">0</span>/10</div></div>
+  </div>
+
+  <div class="card">
+    <h3>問題</h3>
+    <div id="target">スタートを押してね！</div>
+    <div class="row" style="margin-top:8px;">
+      <textarea id="typed" placeholder="ここに入力" disabled></textarea>
+    </div>
+    <div id="judge"></div>
+    <div id="saveStatus" class="muted"></div>
+  </div>
+
+  <div class="card">
+    <h3>ランキング Top10（Firebase共有）</h3>
+    <div class="row">
+      <button class="rank-level-btn active" data-rank-level="1">Lv1</button>
+      <button class="rank-level-btn" data-rank-level="2">Lv2</button>
+      <button class="rank-level-btn" data-rank-level="3">Lv3</button>
+      <button id="refreshRankBtn">再読み込み</button>
+    </div>
+    <div class="muted">※ 初回に index エラーが出たら、コンソールのリンクから複合インデックスを作成してください（1回のみ）</div>
+    <div id="rankError" class="error"></div>
+    <table style="margin-top:8px;">
+      <thead>
+        <tr>
+          <th>順位</th>
+          <th>ニックネーム</th>
+          <th>校舎</th>
+          <th>スコア</th>
+          <th>cpm</th>
+          <th>ミス</th>
+          <th>日時</th>
+        </tr>
+      </thead>
+      <tbody id="rankBody"></tbody>
+    </table>
+  </div>
+
+</div>
+
+<script>
+  // ===== ゲーム本体 =====
+  const QUESTION_BANK = {
+    1: [
+      'print("★"*10)',
+      'a=3\nb=2\nprint(a+b)',
+      'name=input("name: ")',
+      'import time\ntime.sleep(1)',
+      'my_list=["apple","banana"]\nfor item in my_list:\n    print(item)',
+      'for i in range(5):\n    print(i)',
+      'if x>0:\n    print("ok")\nelse:\n    print("ng")',
+      'import random\nprint(random.randint(1,10))',
+      'total=0\nfor n in [1,2,3]:\n    total+=n',
+      'print(f"hello {name}")',
+      'while hp>0:\n    hp-=1'
+    ],
+    2: [
+      'def greet(name):\n    print(f"Hi {name}")',
+      'for i in range(5):\n    print(i)',
+      'if score>=80:\n    print("A")\nelif score>=60:\n    print("B")\nelse:\n    print("C")',
+      'while hp>0:\n    hp-=1',
+      'items=["a","b","c"]\nfor item in items:\n    print(item)',
+      'import time\nfor i in range(3):\n    print(i)\n    time.sleep(1)',
+      'x=10\ny=20\nprint(x+y)',
+      'name=input("name: ")\nprint(f"ようこそ {name} さん")',
+      'import random\nn=random.randint(1,5)\nprint(n)',
+      'print("★"*10)',
+      'def add(a,b):\n    return a+b'
+    ],
+    3: [
+      'def battle(player,enemy):\n    damage=random.randint(1,10)\n    return damage',
+      'for i in range(5):\n    if i%2==0:\n        print(i)',
+      'name_list=["Aoi","Ren","Mio"]\nfor n in name_list:\n    print(f"Hi {n}")',
+      'while timer>0 and hp>0:\n    timer-=1\n    hp-=1',
+      'if miss==0:\n    combo+=1\nelif miss<3:\n    combo+=0\nelse:\n    combo=0',
+      'import time\nimport random\nprint(random.randint(1,10))\ntime.sleep(1)',
+      'total=0\nfor n in [1,2,3,4,5]:\n    total+=n\nprint(total)',
+      'print("★"*10 + " START " + "★"*10)',
+      'def calc(x,y):\n    result=x+y\n    return result',
+      'msg=f"score is {score}"\nprint(msg)',
+      'items=["python","html","css"]\nfor w in items:\n    print(w)'
+    ]
+  };
+
+  const QUESTIONS_PER_GAME = 10;
+  const DIFF_MULTIPLIER = {1:1.0,2:1.2,3:1.4};
+
+  let selectedLevel = 1;
+  let selectedRankLevel = 1;
+  let state = {};
+  const $ = id => document.getElementById(id);
+
+  document.querySelectorAll('.level-btn').forEach(btn=>{
+    btn.onclick = ()=>{
+      document.querySelectorAll('.level-btn').forEach(b=>b.classList.remove('active'));
+      btn.classList.add('active');
+      selectedLevel = Number(btn.dataset.level);
+    };
+  });
+
+  document.querySelectorAll('.rank-level-btn').forEach(btn=>{
+    btn.onclick = async ()=>{
+      document.querySelectorAll('.rank-level-btn').forEach(b=>b.classList.remove('active'));
+      btn.classList.add('active');
+      selectedRankLevel = Number(btn.dataset.rankLevel);
+      await loadAndRenderRanking(selectedRankLevel);
+    };
+  });
+
+  function shuffle(arr){ return [...arr].sort(()=>Math.random()-0.5); }
+  function cpm(){ const m=(Date.now()-state.start)/60000; return m>0?Math.round(state.chars/m):0; }
+  function esc(s){ return String(s).replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('>','&gt;'); }
+
+  function hud(){
+    $('score').textContent = state.score ?? 0;
+    $('combo').textContent = state.combo ?? 0;
+    $('miss').textContent = state.miss ?? 0;
+    $('cpm').textContent = state.start ? cpm() : 0;
+    $('idx').textContent = state.i != null ? Math.min(state.i+1, QUESTIONS_PER_GAME) : 0;
+  }
+
+  function normalizeCode(s){
+    return String(s)
+      .replace(/\r\n/g, '\n')
+      .replace(/[ \t]+/g, '') // スペース・タブを無視
+      .trim();
+  }
+
+  function renderTarget(target, typed=''){
+    const a = target, b = typed;
+    let i = 0;
+    while(i < a.length && i < b.length && a[i] === b[i]) i++;
+    $('target').innerHTML =
+      `<span class="ok">${esc(a.slice(0,i))}</span>` +
+      (i < a.length ? `<span class="cur">${esc(a[i])}</span>` : '') +
+      `${esc(a.slice(i+1))}`;
+  }
+
+  function calcAdd(ans, sec, localMiss){
+    const base = 1800 + ans.length * 25;
+    const speedBonus = Math.max(0, Math.floor((ans.length / Math.max(sec,0.8)) * 60));
+    const comboBonus = state.combo * 120;
+    const missPenalty = localMiss * 80;
+    return Math.max(300, Math.floor((base + speedBonus + comboBonus - missPenalty) * DIFF_MULTIPLIER[state.lv]));
+  }
+
+  function showQuestion(){
+    $('typed').value = '';
+    $('typed').focus();
+    renderTarget(state.qs[state.i], '');
+    state.qStart = Date.now();
+    hud();
+  }
+
+  async function finish(){ // ← await を使うため async
+    const final = Math.max(0, state.score + Math.floor(cpm()*20) - state.miss*50);
+    state.score = final;
+    $('score').textContent = final;
+    $('target').innerHTML = `🎉 終了！\n最終スコア ${final} / 目安MAX 約30000`;
+    $('typed').disabled = true;
+    $('judge').textContent = 'おつかれさま！';
+    hud();
+
+    // ===== 4) ゲーム終了時に保存処理 =====
+    try {
+      $('saveStatus').textContent = 'スコア保存中...';
+      await window.CloudRanking.submitScore({
+        nickname: document.getElementById("nickname").value || "ななし",
+        school: document.getElementById("school").value || "未設定",
+        level: state.lv,
+        score: state.score,
+        cpm: cpm(),
+        miss: state.miss,
+        combo: state.combo
+      });
+      $('saveStatus').innerHTML = '<span class="okmsg">保存しました！</span>';
+
+      // 自分がプレイしたレベルを再表示
+      selectedRankLevel = state.lv;
+      document.querySelectorAll('.rank-level-btn').forEach(b=>{
+        b.classList.toggle('active', Number(b.dataset.rankLevel)===selectedRankLevel);
+      });
+      await loadAndRenderRanking(selectedRankLevel);
+    } catch (err) {
+      console.error(err);
+      $('saveStatus').innerHTML = `<span class="error">保存失敗: ${esc(err.message)}</span>`;
+    }
+  }
+
+  async function nextOrFinish(){
+    state.i++;
+    if(state.i >= QUESTIONS_PER_GAME) await finish();
+    else showQuestion();
+  }
+
+  function checkAutoAdvance(){
+    const typed = $('typed').value;
+    const ans = state.qs[state.i];
+    if(normalizeCode(typed) === normalizeCode(ans)){
+      const sec = (Date.now() - state.qStart) / 1000;
+      state.combo++;
+      const add = calcAdd(ans, sec, 0);
+      state.score += add;
+      $('judge').textContent = `⭕ +${add}`;
+      nextOrFinish();
+    } else {
+      state.chars++;
+      renderTarget(ans, typed);
+      hud();
+    }
+  }
+
+  function insertPair(open, close){
+    const el = $('typed');
+    const start = el.selectionStart, end = el.selectionEnd;
+    const text = el.value;
+    const sel = text.slice(start, end);
+    el.value = text.slice(0,start) + open + sel + close + text.slice(end);
+    el.selectionStart = el.selectionEnd = start + 1;
+    checkAutoAdvance();
+  }
+
+  $('typed').addEventListener('keydown', (e)=>{
+    if($('typed').disabled) return;
+    const el = $('typed');
+
+    // Enterで改行 + ":" 行なら自動インデント
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      const start = el.selectionStart, end = el.selectionEnd, text = el.value;
+      const lineStart = text.lastIndexOf('\n', start - 1) + 1;
+      const line = text.slice(lineStart, start);
+      const baseIndent = (line.match(/^[ \t]*/) || [''])[0].replace(/\t/g, '    ');
+      const trimmed = line.trimEnd();
+      const extraIndent = trimmed.endsWith(':') ? '    ' : '';
+      const insert = '\n' + baseIndent + extraIndent;
+      el.value = text.slice(0,start) + insert + text.slice(end);
+      const newPos = start + insert.length;
+      el.selectionStart = el.selectionEnd = newPos;
+      checkAutoAdvance();
+      return;
+    }
+
+    // 自動ペア
+    if(e.key==='('){ e.preventDefault(); insertPair('(',')'); return; }
+    if(e.key==='['){ e.preventDefault(); insertPair('[',']'); return; }
+    if(e.key==='{'){ e.preventDefault(); insertPair('{','}'); return; }
+    if(e.key==='"'){ e.preventDefault(); insertPair('"','"'); return; }
+    if(e.key==="'"){ e.preventDefault(); insertPair("'","'"); return; }
+  });
+
+  $('typed').addEventListener('input', ()=>{
+    const typed = $('typed').value;
+    const ans = state.qs[state.i];
+    if(!normalizeCode(ans).startsWith(normalizeCode(typed))) state.miss++;
+    checkAutoAdvance();
+  });
+
+  async function countdown3(){
+    $('countdown').textContent = '3'; await wait(1000);
+    $('countdown').textContent = '2'; await wait(1000);
+    $('countdown').textContent = '1'; await wait(1000);
+    $('countdown').textContent = 'START!'; await wait(500);
+    $('countdown').textContent = '';
+  }
+  function wait(ms){ return new Promise(r=>setTimeout(r,ms)); }
+
+  $('startBtn').onclick = async ()=>{
+    const bank = QUESTION_BANK[selectedLevel];
+    if(!bank || bank.length < QUESTIONS_PER_GAME){
+      alert(`Lv${selectedLevel} の問題候補を ${QUESTIONS_PER_GAME} 問以上にしてください。`);
+      return;
+    }
+    state = {
+      name: $('nickname').value.trim() || 'ななし',
+      lv: selectedLevel,
+      qs: shuffle(bank).slice(0, QUESTIONS_PER_GAME),
+      i: 0, score: 0, combo: 0, miss: 0, chars: 0,
+      start: Date.now(), qStart: Date.now()
+    };
+    $('typed').disabled = true;
+    $('judge').textContent = '';
+    $('saveStatus').textContent = '';
+    $('target').textContent = 'まもなく開始...';
+    hud();
+
+    await countdown3();
+
+    state.start = Date.now();
+    $('typed').disabled = false;
+    showQuestion();
+  };
+
+  $('refreshRankBtn').onclick = () => loadAndRenderRanking(selectedRankLevel);
+
+  async function loadAndRenderRanking(level){
+    const errEl = $('rankError');
+    errEl.textContent = '';
+    try {
+      const rows = await window.CloudRanking.loadTop10(level); // 5) Lv選択で取得
+      const tbody = $('rankBody');
+      tbody.innerHTML = '';
+      if(!rows.length){
+        tbody.innerHTML = `<tr><td colspan="7">データなし</td></tr>`;
+        return;
+      }
+      rows.forEach((r, idx)=>{
+        const dt = r.createdAtDate ? new Date(r.createdAtDate).toLocaleString('ja-JP') : '-';
+        tbody.innerHTML += `
+          <tr>
+            <td>${idx+1}</td>
+            <td>${esc(r.nickname || 'ななし')}</td>
+            <td>${esc(r.school || '未設定')}</td>
+            <td>${Number(r.score||0)}</td>
+            <td>${Number(r.cpm||0)}</td>
+            <td>${Number(r.miss||0)}</td>
+            <td>${dt}</td>
+          </tr>
+        `;
+      });
+    } catch (err) {
+      console.error(err);
+      errEl.textContent =
+`ランキング取得エラー:
+${err.message}
+
+※ もし "requires an index" が含まれる場合は、
+コンソールのエラー内URLを開いて複合インデックスを作成してください（1回のみ）。`;
+    }
+  }
+
+  hud();
+</script>
+
+<!-- ===== 3) index.html に Firebase(module script)を追加 ===== -->
+<script type="module">
+  import { initializeApp } from "https://www.gstatic.com/firebasejs/12.12.0/firebase-app.js";
+  import {
+    getFirestore, collection, addDoc, query, where, orderBy, limit, getDocs, serverTimestamp
+  } from "https://www.gstatic.com/firebasejs/12.12.0/firebase-firestore.js";
+
+  const firebaseConfig = {
+    apiKey: "AIzaSyDSMSPILM1HGZm0FE4TkdGxmwPWJl4MFJQ",
+    authDomain: "robodone-typing.firebaseapp.com",
+    projectId: "robodone-typing",
+    storageBucket: "robodone-typing.firebasestorage.app",
+    messagingSenderId: "881783286331",
+    appId: "1:881783286331:web:7754df166f4b2904a34a1e",
+    measurementId: "G-06LBXEFE4L"
+  };
+
+  const app = initializeApp(firebaseConfig);
+  const db = getFirestore(app);
+
+  // グローバル公開（他scriptから使う）
+  window.CloudRanking = {
+    async submitScore({ nickname, school, level, score, cpm, miss, combo }) {
+      await addDoc(collection(db, "scores"), {
+        nickname: nickname || "ななし",
+        school: school || "未設定",
+        level: Number(level),
+        score: Number(score),
+        cpm: Number(cpm || 0),
+        miss: Number(miss || 0),
+        combo: Number(combo || 0),
+        createdAt: serverTimestamp()
+      });
+    },
+
+    async loadTop10(level) {
+      // 6) 初回で index エラーが出たらリンクから作成
+      const q = query(
+        collection(db, "scores"),
+        where("level", "==", Number(level)),
+        orderBy("score", "desc"),
+        limit(10)
+      );
+      const snap = await getDocs(q);
+      return snap.docs.map(d => {
+        const v = d.data();
+        return {
+          ...v,
+          createdAtDate: v.createdAt?.toDate ? v.createdAt.toDate().toISOString() : null
+        };
+      });
+    }
+  };
+
+  // 初期ランキング表示（Lv1）
+  window.dispatchEvent(new Event('cloud-ranking-ready'));
+</script>
+
+<script>
+  // Firebase scriptが準備できてから初回表示
+  window.addEventListener('load', async () => {
+    let retry = 0;
+    while (!window.CloudRanking && retry < 20) {
+      await new Promise(r => setTimeout(r, 100));
+      retry++;
+    }
+    if (window.CloudRanking) {
+      const btn = document.querySelector('.rank-level-btn[data-rank-level="1"]');
+      if (btn) btn.click();
+    }
+  });
+</script>
+</body>
+</html>
